@@ -1,0 +1,117 @@
+---
+title: "PML - Prediction Assignment"
+output: html_document
+---
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+##Data PreProcessing
+
+###Getting the Data
+
+```{r, message=FALSE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+```
+
+Download the data:
+```{r}
+trainUrl <-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+if (!file.exists("./data")) {dir.create("./data")}
+
+download.file(trainUrl, destfile="./data/pml-training.csv")
+download.file(testUrl, destfile="./data/pml-testing.csv")
+
+```
+
+data into two data frames:
+```{r}
+trainRaw <- read.csv("./data/pml-training.csv")
+testRaw <- read.csv("./data/pml-testing.csv")
+
+t(data.frame(dim(trainRaw),dim(testRaw)))
+
+```
+
+###Cleaning the Data
+
+remove missing values and not significant variables:
+```{r}
+trainRaw <- trainRaw[, colSums(is.na(trainRaw)) == 0] 
+testRaw <- testRaw[, colSums(is.na(testRaw)) == 0] 
+```
+
+remove timestamps and variables that are not related with the accelerometer
+```{r}
+classe <- trainRaw$classe
+
+trainRemove <- grepl("^X|timestamp|window", names(trainRaw))
+trainRaw <- trainRaw[, !trainRemove]
+train <- trainRaw[, sapply(trainRaw, is.numeric)]
+train$classe <- classe
+
+testRemove <- grepl("^X|timestamp|window", names(testRaw))
+testRaw <- testRaw[, !testRemove]
+test <- testRaw[, sapply(testRaw, is.numeric)]
+```
+
+new dimensions of training and test set:
+```{r}
+t(data.frame(dim(train),dim(test)))
+```
+
+###Data partitioning
+
+split the training set into a pure training data set (75%) and a validation data set (25%). We will use the validation data set to conduct cross validation in future steps.
+```{r}
+inTrain <- createDataPartition(train$classe, p=0.75, list=FALSE)
+trainData <- train[inTrain, ]
+testData <- train[-inTrain, ]
+```
+
+##Data Modeling
+
+fits a predictive model for activity recognition using Random Forest algorithm. Uses k-fold cross validation with k=6.
+```{r}
+controlRf <- trainControl(method="cv", 6)
+Model <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf, ntree=250)
+Model
+```
+
+Performance of the model on the validation data set.
+```{r}
+Predict <- predict(Model, testData)
+confusionMatrix(testData$classe, Predict)
+accuracy <- postResample(Predict, testData$classe)
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, Predict)$overall[1])
+
+paste("Accuracy: ",round(accuracy[1]*100,3),"%",sep="")
+paste("Kappa: ",round(accuracy[2]*100,3),"%",sep="")
+paste("Out-of-sample error: ",round(oose*100,3),"%",sep="")
+```
+
+##Prediction on Test Data
+
+Applies the model to the original testing data set downloaded from the data source
+```{r}
+test <- test[, -length(names(test))]
+result <- predict(Model, test)
+result
+```
+Tree Visualization
+
+```{r}
+treeModel <- rpart(classe ~ ., data=trainData, method="class")
+prp(treeModel)
+```
+
